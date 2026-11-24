@@ -1,0 +1,16 @@
+{
+  "name": "Bellringer 2099",
+  "short_name": "Bellringer",
+  "description": "A neon endless-runner platformer inspired by Hunchback. Jump the pits and lasers, reach the bell.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0d0524",
+  "theme_color": "#0d0524",
+  "lang": "en",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

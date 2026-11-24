@@ -1,0 +1,805 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="Bellringer 2099: a neon endless-runner platformer inspired by Hunchback. Jump the pits and lasers, reach the bell.">
+<meta name="theme-color" content="#0d0524">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<title>Bellringer 2099</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&display=swap">
+<style>
+/* Layout: a centred 16:9 play field under a slim HUD with a route map in the top right. */
+:root {
+  --bg: #0d0524; --ink: #f2eeff; --muted: #9d8fc7; --line: #2c1b5c;
+  --cyan: #3ff2ff; --gold: #ffd23f; --pink: #ff3d86;
+  color-scheme: dark;
+}
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  padding-block: 16px 24px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.hud {
+  max-width: 960px; margin: 0 auto 12px; height: 96px;
+  display: flex; align-items: center; flex-wrap: wrap; gap: 10px 16px;
+}
+h1 { margin: 0; font: 900 18px/1 Orbitron, system-ui, sans-serif; letter-spacing: .08em; color: var(--cyan); }
+.bar { flex: 1 1 120px; min-width: 0; height: 10px; border-radius: 99px; background: #22103f; overflow: hidden; }
+#fill { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--cyan), var(--gold)); }
+.stats { color: var(--muted); font-size: 13px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.stats b { color: var(--ink); font-weight: 700; }
+.mini { flex: 0 0 220px; width: 220px; height: auto; margin-left: auto; }
+#pause { margin-left: 0; }
+.lang { padding: 5px 12px; font-size: 12px; background: transparent; color: var(--cyan); box-shadow: inset 0 0 0 2px var(--cyan); }
+.stage {
+  position: relative; max-width: 960px; margin: 0 auto;
+  border: 2px solid var(--line); border-radius: 14px; overflow: hidden;
+  touch-action: none; user-select: none; -webkit-user-select: none;
+  box-shadow: 0 0 40px rgba(255, 61, 134, .18);
+}
+canvas { display: block; width: 100%; height: auto; }
+.overlay {
+  position: absolute; inset: 0; display: grid; padding: 12px; overflow-y: auto;
+  text-align: center; background: rgba(13, 5, 36, .72);
+}
+.overlay > div { margin: auto; }
+/* The overlays set display:grid, which would otherwise override the hidden attribute. */
+[hidden] { display: none !important; }
+.overlay h2 { margin: 0 0 8px; font: 900 clamp(20px, 4vw, 30px)/1.1 Orbitron, system-ui, sans-serif; color: var(--gold); }
+.overlay p { margin: 0 auto 18px; max-width: 42ch; color: var(--muted); }
+.overlay .lvName { margin-bottom: 12px; color: var(--ink); font-weight: 700; }
+.row { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
+button {
+  font: inherit; font-weight: 700; padding: 10px 22px; border: 0; border-radius: 10px;
+  background: var(--cyan); color: var(--bg); cursor: pointer;
+}
+button.ghost { background: transparent; color: var(--cyan); box-shadow: inset 0 0 0 2px var(--cyan); }
+button:focus-visible { outline: 3px solid var(--gold); outline-offset: 3px; }
+@media (max-width: 640px) { .hud { height: 168px; align-content: flex-start; } }
+/* The "Help!" bubble beside the castle: it pops in, stays a moment, and pops out. */
+.help { transform-box: fill-box; transform-origin: 100% 50%; animation: help 3.2s ease-in-out infinite; }
+@keyframes help {
+  0%, 10% { opacity: 0; transform: scale(.3); }
+  22%, 58% { opacity: 1; transform: scale(1); }
+  72%, 100% { opacity: 0; transform: scale(.3); }
+}
+.hint { max-width: 960px; margin: 12px auto 0; color: var(--muted); font-size: 13px; text-align: center; }
+</style>
+</head>
+<body>
+<div class="hud">
+  <h1 id="title">GOBBO NEL FUTURO</h1>
+  <div class="bar"><span id="fill"></span></div>
+  <div class="stats"><span id="tLvl">Livello</span> <b id="lvl">1</b>/20 · <span id="pct">0%</span> · <span id="tAtt">Tentativo</span> <b id="att">1</b> · <span id="tRec">Record</span> <b id="best">0%</b> · <span id="tLives">Vite</span> <b id="lives">3</b></div>
+  <button class="lang" id="pause" type="button">Pausa</button>
+  <button class="lang" id="lang" type="button">EN</button>
+  <svg class="mini" id="mini" viewBox="0 0 200 60" role="img" aria-label="Percorso dei livelli fino al castello della principessa">
+    <polyline id="route" fill="none" stroke="#7d6bb8" stroke-width="2.5" stroke-dasharray="4 3" points=""/>
+    <polyline id="done" fill="none" stroke="#3ff2ff" stroke-width="3.5" stroke-linecap="round" points=""/>
+    <g id="castle">
+      <rect x="168" y="16" width="20" height="24" fill="#b9a8ff"/>
+      <rect x="164" y="10" width="8" height="30" fill="#b9a8ff"/>
+      <rect x="188" y="10" width="8" height="30" fill="#b9a8ff"/>
+      <rect x="164" y="6" width="3" height="5" fill="#b9a8ff"/>
+      <rect x="169" y="6" width="3" height="5" fill="#b9a8ff"/>
+      <rect x="188" y="6" width="3" height="5" fill="#b9a8ff"/>
+      <rect x="193" y="6" width="3" height="5" fill="#b9a8ff"/>
+      <rect x="177" y="26" width="6" height="14" fill="#0d0524"/>
+      <rect x="191" y="0" width="1.6" height="10" fill="#ffd23f"/>
+      <path d="M192.6 0 L199 2.8 L192.6 5.6 Z" fill="#ffd23f"/>
+    </g>
+    <circle cx="180" cy="44" r="2.8" fill="#ff7ab8"/>
+    <g id="help" class="help" aria-hidden="true">
+      <rect x="116" y="41" width="42" height="16" rx="5" fill="#ffffff"/>
+      <path d="M157 46 L166 43 L157 50 Z" fill="#ffffff"/>
+      <text x="137" y="53" font-size="11" font-weight="800" text-anchor="middle" fill="#0d0524" font-family="system-ui, sans-serif">Help!</text>
+    </g>
+    <g id="stops"></g>
+    <circle id="dot" r="5.5" fill="#ffd23f" stroke="#ffffff" stroke-width="2"/>
+    <text id="dotLbl" font-size="11" font-weight="700" fill="#ffffff" stroke="#0d0524" stroke-width="3" paint-order="stroke" text-anchor="middle" font-family="system-ui, sans-serif"></text>
+  </svg>
+</div>
+
+<div class="stage" id="stage">
+  <div class="overlay" id="pauseOv" hidden>
+    <div>
+      <h2 id="tPause">In pausa</h2>
+      <button id="resume" type="button">Continua</button>
+    </div>
+  </div>
+  <div class="overlay" id="over" hidden>
+    <div>
+      <h2 id="tOver">Game over</h2>
+      <p id="tOverText"></p>
+      <div class="row">
+        <button id="restart" type="button">Ricomincia</button>
+      </div>
+    </div>
+  </div>
+  <canvas id="c" width="960" height="540" role="img" aria-label="Campo di gioco: salta gli ostacoli fino alla campana"></canvas>
+  <div class="overlay" id="start">
+    <div>
+      <h2 id="tReady">Pronto?</h2>
+      <p id="tIntro">Tocca lo schermo o premi Spazio per saltare. Tieni premuto per saltare di continuo. Alcuni ostacoli vanno evitati restando a terra: non saltare!</p>
+      <p class="lvName" id="lvName"></p>
+      <button id="go" type="button">Gioca</button>
+    </div>
+  </div>
+  <div class="overlay" id="won" hidden>
+    <div>
+      <h2 id="wonTitle">Campana suonata!</h2>
+      <p id="wonText"></p>
+      <div class="row">
+        <button id="next" type="button">Livello successivo</button>
+        <button id="again" type="button" class="ghost">Rigioca</button>
+      </div>
+    </div>
+  </div>
+</div>
+<p class="hint" id="tHint">Spazio, freccia su o tocco per saltare · R per ricominciare · Tocca la corda della campana in fondo al livello</p>
+<script>
+(() => {
+  const W = 960, H = 540, GROUND = 430, S = 40, PX = 170, GRAV = 2600, JUMP = 900;
+  const C = { cyan: '#3ff2ff', gold: '#ffd23f', pink: '#ff3d86', top: '#ffffff', low: '#d9d3ea', ink: '#0d0524', block: '#2b1670', floor: '#12063a' };
+  let SPEED = 330, LEN = 6000, TOTAL = LEN - PX, level = 0;
+  const KEY = 'gobbo-livelli';
+  const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+  const $ = id => document.getElementById(id);
+
+  // Twenty levels, from easy to brutal, each with its own colour: white first, black last.
+  // mix = relative chances of [spike, block, stair, pilone, plat, bar, laser]; pits take a share on top (see build).
+  // gap = px between obstacles, clus = longest spike row, pit = pit width range in px.
+  const LEVELS = [
+    { n: 'Primo passo', speed: 330, len: 6000, gap: [508, 596], mix: [0.6, 0.4, 0, 0, 0, 0, 0], clus: 1, pit: [120, 130], top: '#ffffff', low: '#d9d3ea' },
+    { n: 'Guardie', speed: 340, len: 6800, gap: [471, 553], mix: [0.5, 0.35, 0.05, 0, 0, 0, 0], clus: 2, pit: [110, 130], top: '#ffe66d', low: '#e0a800' },
+    { n: 'Torri', speed: 350, len: 7200, gap: [443, 519], mix: [0.35, 0.25, 0.05, 0.2, 0, 0, 0], clus: 2, pit: [115, 135], top: '#ffb36b', low: '#d9561a' },
+    { n: 'Hover', speed: 360, len: 7600, gap: [414, 486], mix: [0.3, 0.2, 0.1, 0.15, 0.05, 0, 0], clus: 2, pit: [120, 140], top: '#e0474c', low: '#7a0f1a' },
+    { n: 'Buche', speed: 370, len: 8000, gap: [395, 463], mix: [0.25, 0.15, 0.1, 0.15, 0.1, 0, 0], clus: 2, pit: [130, 150], top: '#d4f35a', low: '#6aa300' },
+    { n: 'Primo laser', speed: 375, len: 8600, gap: [385, 451], mix: [0.2, 0.15, 0.1, 0.1, 0.1, 0.1, 0.1], clus: 2, pit: [130, 150], top: '#3fbf6a', low: '#0f5a2e' },
+    { n: 'Doppio', speed: 385, len: 9200, gap: [366, 430], mix: [0.2, 0.15, 0.1, 0.1, 0.08, 0.1, 0.129], clus: 3, pit: [135, 155], top: '#7ff5e0', low: '#0c7a72' },
+    { n: 'Ritmo', speed: 395, len: 9800, gap: [347, 407], mix: [0.2, 0.12, 0.1, 0.1, 0.08, 0.1, 0.157], clus: 3, pit: [140, 160], top: '#3d7bff', low: '#0d2e8c' },
+    { n: 'Stretto', speed: 405, len: 10400, gap: [330, 388], mix: [0.18, 0.12, 0.1, 0.1, 0.08, 0.12, 0.186], clus: 3, pit: [145, 165], top: '#9fdcff', low: '#2a7fb8' },
+    { n: 'Muro', speed: 415, len: 11000, gap: [315, 369], mix: [0.18, 0.1, 0.1, 0.1, 0.07, 0.12, 0.214], clus: 4, pit: [150, 170], top: '#8a4dff', low: '#2b0f6b' },
+    { n: 'Orbita', speed: 425, len: 11800, gap: [296, 348], mix: [0.17, 0.1, 0.1, 0.1, 0.07, 0.13, 0.243], clus: 4, pit: [155, 175], top: '#e04bd0', low: '#6a0f5e' },
+    { n: 'Nebulosa', speed: 435, len: 12400, gap: [278, 326], mix: [0.16, 0.1, 0.1, 0.12, 0.07, 0.14, 0.271], clus: 4, pit: [160, 180], top: '#f3deb0', low: '#a88246' },
+    { n: 'Plasma', speed: 445, len: 13000, gap: [263, 309], mix: [0.148, 0.099, 0.099, 0.119, 0.059, 0.148, 0.297], clus: 4, pit: [165, 185], top: '#a0694a', low: '#4a2412' },
+    { n: 'Turbo', speed: 455, len: 13800, gap: [248, 292], mix: [0.147, 0.078, 0.098, 0.118, 0.049, 0.157, 0.322], clus: 4, pit: [170, 190], top: '#d0d4da', low: '#6b7480' },
+    { n: 'Cyber', speed: 465, len: 14600, gap: [232, 272], mix: [0.135, 0.077, 0.096, 0.116, 0.048, 0.154, 0.344], clus: 4, pit: [170, 195], top: '#9aa43a', low: '#4b5418' },
+    { n: 'Hangar', speed: 475, len: 15400, gap: [221, 259], mix: [0.132, 0.076, 0.095, 0.113, 0.038, 0.151, 0.365], clus: 4, pit: [175, 195], top: '#2a6f7a', low: '#0a2f36' },
+    { n: 'Asteroidi', speed: 485, len: 16200, gap: [210, 246], mix: [0.129, 0.064, 0.092, 0.11, 0.037, 0.156, 0.381], clus: 4, pit: [180, 200], top: '#4a4f5c', low: '#14161d' },
+    { n: 'Quasar', speed: 492, len: 17000, gap: [202, 238], mix: [0.118, 0.063, 0.09, 0.108, 0.036, 0.154, 0.4], clus: 4, pit: [185, 200], top: '#1d2b4f', low: '#070c1c' },
+    { n: 'Vortice', speed: 498, len: 17800, gap: [197, 231], mix: [0.12, 0.055, 0.092, 0.092, 0.037, 0.138, 0.435], clus: 4, pit: [190, 200], top: '#7a1030', low: '#2a0010' },
+    { n: 'Cupola', speed: 505, len: 18600, gap: [191, 225], mix: [0.108, 0.054, 0.09, 0.09, 0.036, 0.144, 0.449], clus: 4, pit: [195, 200], top: '#050505', low: '#000000' },
+  ];
+  const LIGHT = [0, 1, 4, 6, 8, 11, 13, 14]; // light colours: their buttons get dark text
+  const NL = LEVELS.length;
+  const NAMES_EN = ['First Step', 'Guards', 'Towers', 'Hover', 'Pits', 'First Laser', 'Double', 'Rhythm', 'Tight', 'Wall', 'Orbit', 'Nebula', 'Plasma', 'Turbo', 'Cyber', 'Hangar', 'Asteroids', 'Quasar', 'Vortex', 'Dome'];
+  const T = {
+    it: { title: 'CAMPANARO 2099', lvl: 'Livello', att: 'Tentativo', rec: 'Record', ready: 'Pronto?',
+      intro: 'Tocca lo schermo o premi Spazio per saltare. Tieni premuto per saltare di continuo. Alcuni ostacoli vanno evitati restando a terra: non saltare!',
+      go: 'Gioca', next: 'Livello successivo', again: 'Rigioca', menu: 'Livelli',
+      hint: 'Spazio, freccia su o tocco per saltare · R per ricominciare · Tocca la corda della campana in fondo al livello',
+      bell: 'Campana suonata!', saved: 'Principessa salvata!', pauseBtn: 'Pausa', lives: 'Vite', pause: 'In pausa', resume: 'Continua', over: 'Game over', overText: 'Hai finito le vite. Si ricomincia dal livello 1.', restart: 'Ricomincia', thanks: 'Grazie amore mio!', bonus: 'Hai guadagnato una vita!',
+      done: (n, a) => `Livello ${n} superato al tentativo ${a}.`,
+      all: a => `Hai superato tutti i ${NL} livelli, l'ultimo al tentativo ${a}. La principessa è al sicuro.`,
+      lvName: (n, name) => `Livello ${n}: ${name}`,
+      names: LEVELS.map(L => L.n) },
+    en: { title: 'BELLRINGER 2099', lvl: 'Level', att: 'Attempt', rec: 'Best', ready: 'Ready?',
+      intro: `Tap the screen or press Space to jump. Hold to keep jumping. Some obstacles must be avoided by staying on the ground: don't jump!`,
+      go: 'Play', next: 'Next level', again: 'Replay', menu: 'Levels',
+      hint: 'Space, up arrow or tap to jump · R to restart · Touch the bell rope at the end of each level',
+      bell: 'Bell rung!', saved: 'Princess saved!', pauseBtn: 'Pause', lives: 'Lives', pause: 'Paused', resume: 'Resume', over: 'Game over', overText: 'You ran out of lives. Back to level 1.', restart: 'Restart', thanks: 'Thank you, my love!', bonus: 'You earned an extra life!',
+      done: (n, a) => `Level ${n} cleared on attempt ${a}.`,
+      all: a => `You cleared all ${NL} levels; the last one on attempt ${a}. The princess is safe.`,
+      lvName: (n, name) => `Level ${n}: ${name}`,
+      names: NAMES_EN },
+  };
+
+  // Each level has its own fixed seed, so every attempt plays the same map.
+  let seed = 1;
+  const rnd = () => (seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296;
+  let solids = [], spikes = [], pits = [], beams = [];
+  const KINDS = ['spike', 'block', 'stair', 'pilone', 'plat', 'bar', 'laser'];
+  function build(i) {
+    const L = LEVELS[i], m = L.mix;
+    seed = 20240607 + i * 7919;
+    solids = []; spikes = []; pits = []; beams = [];
+    let lastKind = '', extra = 0, pitCount = 0;
+    // Pits get a share of the picks that grows with the level; the other kinds share the rest.
+    const pitShare = 0.08, scale = (1 - pitShare) / m.reduce((s, v) => s + v, 0);
+    for (let x = 900; x < L.len - 600;) {
+      const r = rnd();
+      let acc = 0, kind = 'pit';
+      for (let k = 0; k < KINDS.length; k++) {
+        acc += m[k] * scale;
+        if (r < acc) { kind = KINDS[k]; break; }
+      }
+      // Every level gets at least one pit, once the first stretch is behind the player.
+      if (pitCount === 0 && x > 2400) kind = 'pit';
+      // A laser never follows a tall obstacle (it becomes a bar), and a tall obstacle never follows a laser.
+      if (kind === 'laser' && (lastKind === 'pilone' || lastKind === 'stair')) kind = 'bar';
+      if ((kind === 'pilone' || kind === 'stair') && lastKind === 'laser') kind = 'block';
+      // Two tall obstacles in a row would need a double jump, so the second one becomes a block.
+      if ((kind === 'pilone' || kind === 'stair') && (lastKind === 'pilone' || lastKind === 'stair')) kind = 'block';
+      // In the harder levels some spikes become fixed red bars, which must not be jumped into.
+      if (kind === 'spike' && rnd() < 0.3 * i / (NL - 1)) kind = 'bar';
+      if (kind === 'spike') {
+        const n = 1 + Math.floor(rnd() * L.clus);
+        for (let k = 0; k < n; k++) spikes.push({ x: x + k * S, y: GROUND - S, w: S, h: S });
+        x += n * S;
+      } else if (kind === 'block') {
+        solids.push({ x, y: GROUND - S, w: 2 * S, h: S, kind });
+        x += 2 * S;
+      } else if (kind === 'stair') {
+        solids.push({ x, y: GROUND - S, w: 2 * S, h: S, kind }, { x: x + 2 * S, y: GROUND - 2 * S, w: 2 * S, h: 2 * S, kind });
+        x += 4 * S;
+      } else if (kind === 'pilone') {
+        solids.push({ x, y: GROUND - 3 * S, w: S, h: 3 * S, kind });
+        x += S;
+      } else if (kind === 'plat') {
+        solids.push({ x, y: GROUND - 3 * S, w: 3 * S, h: 14, kind });
+        x += 3 * S;
+      } else if (kind === 'bar') {
+        beams.push({ x0: x, x, y: GROUND - 120, w: 3 * S, h: 14, vx: 0 });
+        x += 3 * S;
+      } else if (kind === 'laser') {
+        // The laser starts far ahead so that it reaches the cube exactly at x.
+        const x0 = x + 200 * (x - PX) / SPEED;
+        beams.push({ x0, x: x0, y: GROUND - 120, w: 70, h: 12, vx: -200 });
+        x += 70; extra = 150;
+      } else {
+        const w = L.pit[0] + Math.floor(rnd() * (L.pit[1] - L.pit[0]));
+        pits.push({ x1: x, x2: x + w });
+        pitCount++;
+        x += w;
+      }
+      lastKind = kind;
+      x += L.gap[0] + rnd() * (L.gap[1] - L.gap[0]) + extra;
+      extra = 0;
+    }
+  }
+
+  let state = 'ready', scroll = 0, attempts = 1, held = false, paused = false, lives = 3;
+  let deadT = 0, flash = 0, shake = 0, runT = 0, p, trail = [];
+  let last = performance.now();
+  const parts = [];
+  let finaleT = 0, fwT = 0, heartT = 0, hearts = [];
+  // Progress is kept only in memory: every new visit starts again from level 1.
+  let bests = [];
+  const bestOf = i => Number(bests[i]) || 0;
+  // Language: English by default; the visitor's choice is remembered.
+  let lang = 'en';
+  try { lang = localStorage.getItem(KEY + '-lang') || lang; } catch (e) {}
+  function applyLang() {
+    const t = T[lang];
+    document.documentElement.lang = lang;
+    $('title').textContent = t.title;
+    $('tLvl').textContent = t.lvl; $('tAtt').textContent = t.att; $('tRec').textContent = t.rec;
+    $('tReady').textContent = t.ready; $('tIntro').textContent = t.intro; $('tHint').textContent = t.hint;
+    $('go').textContent = t.go; $('next').textContent = t.next; $('again').textContent = t.again;
+    $('pause').textContent = t.pauseBtn; $('tLives').textContent = t.lives;
+    $('tPause').textContent = t.pause; $('resume').textContent = t.resume;
+    $('tOver').textContent = t.over; $('tOverText').textContent = t.overText;
+    $('restart').textContent = t.restart;
+    $('lang').textContent = lang === 'it' ? 'EN' : 'IT';
+    showName();
+  }
+  function toggleLang() {
+    lang = lang === 'it' ? 'en' : 'it';
+    try { localStorage.setItem(KEY + '-lang', lang); } catch (e) {}
+    applyLang();
+  }
+
+  let ac = null;
+  function beep(freq, dur) {
+    try {
+      ac = ac || new (window.AudioContext || window.webkitAudioContext)();
+      const t = ac.currentTime, o = ac.createOscillator(), g = ac.createGain();
+      o.type = 'square'; o.frequency.value = freq;
+      g.gain.setValueAtTime(0.04, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      o.connect(g); g.connect(ac.destination); o.start(t); o.stop(t + dur);
+    } catch (e) {}
+  }
+  function burst(x, y, n, color) {
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2, v = 120 + Math.random() * 320;
+      parts.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: 1, color });
+    }
+  }
+
+  // Route map in the top right: one stop per level, the castle with the princess at the end.
+  const routePts = LEVELS.map((_, i) => ({ x: 8 + 150 * i / (NL - 1), y: 46 - 22 * i / (NL - 1) + 3 * Math.sin(i * 1.1) }));
+  const pathStr = pts => pts.map(q => q.x.toFixed(1) + ',' + q.y.toFixed(1)).join(' ');
+  function setMini(prog) {
+    const k = Math.max(0, Math.min(NL - 1, prog)), q = routePts[k];
+    $('route').setAttribute('points', pathStr(routePts));
+    $('done').setAttribute('points', pathStr(routePts.slice(0, k + 1)));
+    // One stop per level: lit when passed or reached, dim when still ahead.
+    const stops = $('stops');
+    if (!stops.childElementCount) routePts.forEach(q => {
+      const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      c.setAttribute('cx', q.x.toFixed(1)); c.setAttribute('cy', q.y.toFixed(1)); c.setAttribute('r', '2.2');
+      stops.appendChild(c);
+    });
+    [...stops.children].forEach((c, i) => c.setAttribute('fill', i <= k ? '#3ff2ff' : '#5b4a8a'));
+    $('dot').setAttribute('cx', q.x.toFixed(1)); $('dot').setAttribute('cy', q.y.toFixed(1));
+    $('dotLbl').setAttribute('x', q.x.toFixed(1)); $('dotLbl').setAttribute('y', (q.y - 8).toFixed(1));
+    $('dotLbl').textContent = 'Lv ' + (k + 1);
+  }
+
+  function reset(next) {
+    state = next; scroll = 0; deadT = 0; trail = []; finaleT = 0; fwT = 0; heartT = 0; hearts = [];
+    p = { y: GROUND - S, vy: 0, onGround: true };
+    for (const b of beams) b.x = b.x0;
+    $('won').hidden = true;
+    $('over').hidden = true; $('pauseOv').hidden = true; paused = false;
+  }
+  function loadLevel(i) {
+    level = i;
+    const L = LEVELS[i];
+    const t = i / (NL - 1);
+    SPEED = L.speed * (1.08 + 0.1 * t); LEN = L.len; TOTAL = LEN - PX;
+    C.top = L.top; C.low = L.low;
+    build(i);
+  }
+  function startLevel(i) {
+    loadLevel(i);
+    attempts = 1;
+    reset('play');
+    $('start').hidden = true;
+    $('lvl').textContent = i + 1;
+    setMini(i);
+  }
+  // The start screen names the level that the run begins on.
+  function showName() {
+    $('lvName').textContent = T[lang].lvName(level + 1, T[lang].names[level]);
+  }
+  function die() {
+    if (state !== 'play') return;
+    state = 'dead'; deadT = 0; flash = 1; lives--;
+    bests[level] = Math.max(bestOf(level), Math.floor(Math.min(1, scroll / TOTAL) * 100));
+    burst(PX + S / 2, p.y + S / 2, 40, C.pink); beep(160, 0.3);
+    attempts++;
+  }
+  function win() {
+    state = 'won'; bests[level] = 100;
+    const last = level === NL - 1, t = T[lang], bonus = [5, 10, 15].includes(level + 1);
+    if (bonus) lives++;
+    $('wonTitle').textContent = last ? t.saved : t.bell;
+    $('wonText').textContent = last ? t.all(attempts) : t.done(level + 1, attempts) + (bonus ? ' ' + t.bonus : '');
+    $('next').hidden = last;
+    setMini(level + 1);
+    $('won').hidden = last;
+    burst(PX + S, 280, 60, C.gold); beep(880, 0.4);
+  }
+  // Intro: the first section of "The Teddy Bears' Picnic" is played once, on a synthesized harpsichord (no audio files).
+  // The melody is public domain (John W. Bratton, 1907); the words are not used.
+  const EIGHTH = 0.115, PITCH = { E4: 329.63, A4: 440.0, B4: 493.88, G4: 392.0, C5: 523.25, D5: 587.33, E5: 659.25, G5: 783.99, A5: 880.0 };
+  // [pitch, length in eighth notes]: the whole first section, from the pickup to the last bar. Played once.
+  const INTRO = [
+    [PITCH.E4, 3],
+    [PITCH.A4, 2], [PITCH.C5, 1], [PITCH.B4, 1], [PITCH.C5, 1], [PITCH.B4, 1],
+    [PITCH.A4, 2], [PITCH.C5, 1], [PITCH.B4, 2], [PITCH.C5, 1],
+    [PITCH.A4, 1], [PITCH.B4, 1], [PITCH.C5, 1], [PITCH.B4, 2], [PITCH.C5, 1],
+    [PITCH.A4, 5], [PITCH.G4, 1],
+    [PITCH.C5, 2], [PITCH.E5, 1], [PITCH.D5, 1], [PITCH.E5, 1], [PITCH.D5, 1],
+    [PITCH.C5, 2], [PITCH.E5, 1], [PITCH.D5, 2], [PITCH.E5, 1],
+    [PITCH.C5, 1], [PITCH.D5, 1], [PITCH.E5, 1], [PITCH.D5, 2], [PITCH.E5, 1],
+    [PITCH.C5, 5], [PITCH.G5, 1],
+    [PITCH.A5, 2], [PITCH.G5, 1], [PITCH.A5, 2], [PITCH.G5, 1],
+    [PITCH.D5, 1], [PITCH.E5, 1], [PITCH.G5, 1], [PITCH.E5, 2], [PITCH.D5, 1],
+    [PITCH.D5, 2], [PITCH.C5, 1], [PITCH.D5, 2], [PITCH.C5, 1],
+    [PITCH.G4, 1], [PITCH.A4, 1], [PITCH.C5, 1], [PITCH.A4, 2], [PITCH.G4, 1],
+    [PITCH.A4, 2], [PITCH.C5, 1], [PITCH.G4, 2], [PITCH.G4, 1],
+    [PITCH.A4, 1], [PITCH.B4, 1], [PITCH.C5, 1], [PITCH.G4, 2], [PITCH.E5, 1],
+    [PITCH.D5, 6],
+    [PITCH.C5, 3],
+  ];
+  let introOn = false, introLevel = 0, introTimer = 0, introAc = null, introMaster = null;
+  // One plucked string: a sawtooth through a lowpass that closes quickly, which gives the harpsichord's bright snap.
+  function pluck(ac, out, freq, when) {
+    const ring = 0.4;
+    const amp = ac.createGain(), lp = ac.createBiquadFilter();
+    const saw = ac.createOscillator(), oct = ac.createOscillator(), octGain = ac.createGain();
+    saw.type = 'sawtooth'; saw.frequency.value = freq;
+    oct.type = 'triangle'; oct.frequency.value = freq * 2; octGain.gain.value = 0.3;
+    lp.type = 'lowpass'; lp.Q.value = 3;
+    lp.frequency.setValueAtTime(freq * 10, when);
+    lp.frequency.exponentialRampToValueAtTime(freq * 1.5, when + 0.45);
+    amp.gain.setValueAtTime(0.0001, when);
+    amp.gain.exponentialRampToValueAtTime(0.12, when + 0.004);
+    amp.gain.exponentialRampToValueAtTime(0.0001, when + ring);
+    saw.connect(lp); oct.connect(octGain); octGain.connect(lp);
+    lp.connect(amp); amp.connect(out);
+    saw.start(when); oct.start(when); saw.stop(when + ring + 0.05); oct.stop(when + ring + 0.05);
+  }
+  // Schedules the whole intro once and calls done() when it ends. Without audio, done() runs at once.
+  function playIntro(done) {
+    try {
+      introAc = introAc || new (window.AudioContext || window.webkitAudioContext)();
+      if (introAc.state === 'suspended') introAc.resume();
+      introMaster = introAc.createGain(); introMaster.gain.value = 0.9; introMaster.connect(introAc.destination);
+      let t = introAc.currentTime + 0.1;
+      for (const [freq, n] of INTRO) { pluck(introAc, introMaster, freq, t); t += n * EIGHTH; }
+      introTimer = setTimeout(done, (t - introAc.currentTime) * 1000 + 600);
+    } catch (e) { introMaster = null; setTimeout(done, 0); }
+  }
+  // Starts level i after the intro. Pressing Play runs the intro; the next levels do not.
+  function startWithIntro(i) {
+    if (introOn) return;
+    introOn = true; introLevel = i;
+    $('start').hidden = true;
+    playIntro(endIntro);
+  }
+  function endIntro() {
+    if (!introOn) return;
+    introOn = false; clearTimeout(introTimer);
+    if (introMaster) { introMaster.gain.setTargetAtTime(0, introAc.currentTime, 0.02); introMaster = null; }
+    freshRun(introLevel);
+  }
+  // A tap or key during the intro skips it and starts the run at once.
+  function press() {
+    if (introOn) return endIntro();
+    if (state === 'ready') startWithIntro(level);
+  }
+  // Three lives per run; a new run starts with three again.
+  function freshRun(i) { lives = 3; startLevel(i); }
+  function gameOver() {
+    state = 'over';
+    $('tOverText').textContent = T[lang].overText;
+    $('over').hidden = false;
+    burst(PX + S / 2, GROUND - S, 50, C.pink); beep(120, 0.6);
+  }
+  function setPaused(on) {
+    if (state !== 'play') return;
+    paused = on; held = false;
+    $('pauseOv').hidden = !on;
+  }
+  function togglePause() { setPaused(!paused); }
+  function overlap(a, b) {
+    return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+  }
+
+  function update(dt) {
+    if (held && p.onGround) {
+      p.vy = -JUMP; p.onGround = false; beep(520, 0.04);
+      burst(PX + S / 2, p.y + S, 6, C.cyan);
+    }
+    scroll += SPEED * dt;
+    runT += dt * 16;
+    for (const b of beams) b.x += b.vx * dt;
+    const px = scroll + PX, cx = px + S / 2;
+    const prevBottom = p.y + S;
+    p.vy += GRAV * dt;
+    p.y += p.vy * dt;
+    p.onGround = false;
+    let bottom = p.y + S;
+
+    // Floor, except where a pit opens under the player's centre. The floor only catches a runner coming
+    // from above, so one that has fallen into a pit cannot be lifted back out when it passes the edge.
+    if (bottom >= GROUND && prevBottom <= GROUND + 1 && p.vy >= 0 && !pits.some(q => cx > q.x1 && cx < q.x2)) {
+      p.y = GROUND - S; p.vy = 0; p.onGround = true; bottom = GROUND;
+    }
+    // Solids: land on top, die on any other contact.
+    for (const b of solids) {
+      if (px + S - 6 <= b.x || px + 6 >= b.x + b.w) continue;
+      if (prevBottom <= b.y + 2 && bottom >= b.y && p.vy >= 0) {
+        p.y = b.y - S; p.vy = 0; p.onGround = true; bottom = b.y;
+      } else if (bottom > b.y + 4 && p.y < b.y + b.h - 4) return die();
+    }
+    // Spikes, with a forgiving hitbox.
+    const pb = { x: px + 8, y: p.y + 8, w: S - 16, h: S - 14 };
+    for (const s of spikes) {
+      if (overlap(pb, { x: s.x + 10, y: s.y + 16, w: s.w - 20, h: s.h - 16 })) return die();
+    }
+    // Beams: bars and lasers that kill a jumping player.
+    for (const b of beams) {
+      if (overlap(pb, b)) return die();
+    }
+    if (p.y > H) return die(); // fell out of the bottom of the screen
+    // The bell rope: touching it on the way up wins the level.
+    if (overlap({ x: px + 8, y: p.y + 4, w: S - 16, h: S - 6 }, { x: LEN - 4, y: 0, w: 8, h: 296 })) return win();
+    // Ran past the rope without touching it.
+    if (px > LEN + 30) return die();
+    trail.push({ x: px + S / 2, y: p.y + S / 2 });
+    if (trail.length > 12) trail.shift();
+  }
+
+  const FW_COLORS = ['#ffd23f', '#3ff2ff', '#ff3d86', '#8a4dff', '#ffffff'];
+  // A heart made of two round lobes and a point.
+  function drawHeart(x, y, s, col) {
+    const r = s / 3;
+    ctx.fillStyle = col;
+    ctx.beginPath();
+    ctx.moveTo(x, y); ctx.arc(x - r, y, r, 0, Math.PI * 2);
+    ctx.moveTo(x + 2 * r, y); ctx.arc(x + r, y, r, 0, Math.PI * 2);
+    ctx.moveTo(x - 2 * r, y + 0.1 * r); ctx.lineTo(x, y + 2.6 * r); ctx.lineTo(x + 2 * r, y + 0.1 * r);
+    ctx.fill();
+  }
+  // A speech bubble path, top-left corner at (x, y).
+  function bubble(x, y, w, h) {
+    const r = 12;
+    ctx.beginPath();
+    ctx.moveTo(x + r, y); ctx.lineTo(x + w - r, y); ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+    ctx.lineTo(x + w, y + h - r); ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    ctx.lineTo(x + r, y + h); ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+    ctx.lineTo(x, y + r); ctx.quadraticCurveTo(x, y, x + r, y); ctx.closePath();
+  }
+  // The princess: a tidy gown, a cape, flowing hair, a tiara and a little smile.
+  function drawPrincess(x) {
+    const g = GROUND;
+    ctx.fillStyle = '#5a2a8a';
+    ctx.beginPath(); ctx.moveTo(x - 9, g - 56); ctx.quadraticCurveTo(x - 30, g - 30, x - 22, g);
+    ctx.lineTo(x + 2, g); ctx.quadraticCurveTo(x - 6, g - 30, x + 9, g - 56); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#7a3fb0';
+    ctx.beginPath(); ctx.ellipse(x, g - 66, 11, 13, 0, 0, Math.PI * 2); ctx.fill();
+    const gown = ctx.createLinearGradient(x - 24, 0, x + 24, 0);
+    gown.addColorStop(0, '#ff8fc4'); gown.addColorStop(0.5, '#ffd6ea'); gown.addColorStop(1, '#ff6fae');
+    ctx.fillStyle = gown;
+    ctx.beginPath(); ctx.moveTo(x - 7, g - 42); ctx.quadraticCurveTo(x - 24, g - 18, x - 20, g);
+    ctx.lineTo(x + 20, g); ctx.quadraticCurveTo(x + 24, g - 18, x + 7, g - 42); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#ffd1e8';
+    ctx.beginPath(); ctx.moveTo(x - 8, g - 56); ctx.lineTo(x + 8, g - 56); ctx.lineTo(x + 7, g - 40); ctx.lineTo(x - 7, g - 40); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = C.gold; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(x - 7, g - 40); ctx.lineTo(x + 7, g - 40); ctx.stroke();
+    drawHeart(x, g - 49, 4, C.pink);
+    ctx.fillStyle = '#ffe0c2'; ctx.beginPath(); ctx.arc(x, g - 66, 7.5, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = C.ink; ctx.beginPath(); ctx.arc(x - 2.8, g - 66, 1.1, 0, Math.PI * 2); ctx.arc(x + 2.8, g - 66, 1.1, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(255, 61, 134, .45)'; ctx.beginPath(); ctx.arc(x - 4.5, g - 62.5, 1.6, 0, Math.PI * 2); ctx.arc(x + 4.5, g - 62.5, 1.6, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = C.ink; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(x, g - 63.5, 2, 0.2, Math.PI - 0.2); ctx.stroke();
+    ctx.fillStyle = '#7a3fb0'; ctx.beginPath(); ctx.arc(x, g - 68, 8, Math.PI, 0); ctx.fill();
+    ctx.fillStyle = C.gold; ctx.beginPath();
+    ctx.moveTo(x - 8, g - 74); ctx.lineTo(x - 6, g - 81); ctx.lineTo(x - 3, g - 76); ctx.lineTo(x, g - 83);
+    ctx.lineTo(x + 3, g - 76); ctx.lineTo(x + 6, g - 81); ctx.lineTo(x + 8, g - 74); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = C.cyan; ctx.beginPath(); ctx.arc(x, g - 77, 1.6, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = C.pink; ctx.beginPath(); ctx.arc(x - 6, g - 77, 1.2, 0, Math.PI * 2); ctx.arc(x + 6, g - 77, 1.2, 0, Math.PI * 2); ctx.fill();
+  }
+  // Finale: fireworks over the castle and hearts rising from the princess; the menu appears after a few seconds.
+  function finale(dt) {
+    finaleT += dt;
+    if (finaleT - fwT > 0.45) {
+      fwT = finaleT;
+      burst(90 + Math.random() * 780, 50 + Math.random() * 190, 44, FW_COLORS[Math.floor(Math.random() * FW_COLORS.length)]);
+      beep(500 + Math.random() * 500, 0.25);
+    }
+    if (finaleT - heartT > 0.2) {
+      heartT = finaleT;
+      hearts.push({ x: LEN - scroll + 50 + (Math.random() - 0.5) * 14, y: GROUND - 80, vx: (Math.random() - 0.5) * 60, vy: -(80 + Math.random() * 60), life: 1 });
+    }
+    for (const h of hearts) { h.x += h.vx * dt; h.y += h.vy * dt; h.life -= dt * 0.4; }
+    hearts = hearts.filter(h => h.life > 0);
+    if (finaleT > 4.5 && $('won').hidden) $('won').hidden = false;
+  }
+  function draw() {
+    ctx.save();
+    if (shake > 0) ctx.translate((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake);
+
+    const g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, C.top); g.addColorStop(1, C.low);
+    ctx.fillStyle = g; ctx.fillRect(-20, -20, W + 40, H + 40);
+
+    // Parallax grid, in a tone that reads on light and dark levels.
+    ctx.strokeStyle = LIGHT.includes(level) ? 'rgba(13, 5, 36, .09)' : 'rgba(214, 190, 255, 0.09)';
+    ctx.lineWidth = 2; ctx.beginPath();
+    for (let x = -((scroll * 0.5) % 80); x < W; x += 80) { ctx.moveTo(x, 0); ctx.lineTo(x, GROUND); }
+    for (let y = 40; y < GROUND; y += 80) { ctx.moveTo(0, y); ctx.lineTo(W, y); }
+    ctx.stroke();
+
+    // Floor, split around the pits.
+    let cur = scroll; const segs = [];
+    for (const q of pits) {
+      if (q.x2 < scroll) continue;
+      if (q.x1 > scroll + W) break;
+      if (q.x1 > cur) segs.push([cur, q.x1]);
+      cur = Math.max(cur, q.x2);
+    }
+    segs.push([cur, scroll + W + 1]);
+    for (const [a, b] of segs) {
+      if (b <= a) continue;
+      ctx.fillStyle = C.floor; ctx.fillRect(a - scroll, GROUND, b - a, H - GROUND);
+      ctx.fillStyle = C.cyan; ctx.shadowColor = C.cyan; ctx.shadowBlur = 12;
+      ctx.fillRect(a - scroll, GROUND, b - a, 3); ctx.shadowBlur = 0;
+    }
+
+    // Solids: blocks, stairs, pillars and floating platforms.
+    for (const b of solids) {
+      const sx = b.x - scroll;
+      if (sx > W || sx + b.w < 0) continue;
+      ctx.fillStyle = b.kind === 'plat' ? '#1f4f7a' : b.kind === 'pilone' ? '#3a1d7a' : C.block;
+      ctx.fillRect(sx, b.y, b.w, b.h);
+      ctx.strokeStyle = b.kind === 'plat' ? C.cyan : C.gold; ctx.lineWidth = 3;
+      ctx.strokeRect(sx + 1.5, b.y + 1.5, b.w - 3, b.h - 3);
+      if (b.kind === 'pilone') { ctx.fillStyle = C.pink; ctx.fillRect(sx + b.w / 2 - 2, b.y + 6, 4, b.h - 12); }
+    }
+
+    // Spikes.
+    // Guards: futuristic soldiers in silver armour, one per obstacle cell. Jump over their rifles.
+    const drawGuard = x => {
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = '#2c3a5c'; ctx.fillRect(x + 12, GROUND - 12, 6, 12); ctx.fillRect(x + 22, GROUND - 12, 6, 12);
+      ctx.fillStyle = '#5b6f99'; ctx.fillRect(x + 9, GROUND - 28, 22, 18);
+      ctx.fillStyle = C.cyan; ctx.fillRect(x + 13, GROUND - 21, 14, 2);
+      ctx.fillStyle = '#2c3a5c'; ctx.fillRect(x + 1, GROUND - 23, 13, 3);
+      ctx.fillStyle = C.cyan; ctx.fillRect(x + 1, GROUND - 23, 2, 3);
+      ctx.fillStyle = '#dfe9ff'; ctx.beginPath(); ctx.arc(x + 20, GROUND - 34, 8, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#0d0524'; ctx.fillRect(x + 14, GROUND - 37, 13, 6);
+      ctx.fillStyle = C.cyan; ctx.shadowColor = C.cyan; ctx.shadowBlur = 8; ctx.fillRect(x + 15, GROUND - 35, 11, 2); ctx.shadowBlur = 0;
+      ctx.strokeStyle = C.pink; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(x + 20, GROUND - 42); ctx.lineTo(x + 20, GROUND - 47); ctx.stroke();
+      ctx.fillStyle = C.pink; ctx.beginPath(); ctx.arc(x + 20, GROUND - 48, 2.2, 0, Math.PI * 2); ctx.fill();
+    };
+    for (const s of spikes) {
+      const sx = s.x - scroll;
+      if (sx > W || sx + s.w < 0) continue;
+      drawGuard(sx);
+    }
+    ctx.shadowBlur = 0;
+
+    // Beams: bars (blue, fixed) and lasers (pink, moving at you).
+    for (const b of beams) {
+      const sx = b.x - scroll;
+      if (sx > W || sx + b.w < 0) continue;
+      const col = b.vx ? C.pink : '#ff2a2a';
+      ctx.shadowColor = col; ctx.shadowBlur = 14;
+      ctx.fillStyle = col; ctx.fillRect(sx, b.y, b.w, b.h);
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = '#ffffff'; ctx.fillRect(sx + 4, b.y + b.h / 2 - 1, b.w - 8, 2);
+    }
+
+    // The bell and its rope at the end of the level; the princess waits beside it on the last level.
+    const rx = LEN - scroll;
+    if (rx > -60 && rx < W + 60) {
+      ctx.strokeStyle = '#e8d9a8'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(rx, 0); ctx.lineTo(rx, 268); ctx.stroke();
+      ctx.fillStyle = C.gold; ctx.shadowColor = C.gold; ctx.shadowBlur = 14;
+      ctx.beginPath();
+      ctx.moveTo(rx - 14, 286); ctx.quadraticCurveTo(rx - 14, 268, rx, 268); ctx.quadraticCurveTo(rx + 14, 268, rx + 14, 286);
+      ctx.lineTo(rx + 18, 292); ctx.lineTo(rx - 18, 292); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.arc(rx, 298, 4, 0, Math.PI * 2); ctx.fill();
+      ctx.shadowBlur = 0;
+      if (level === NL - 1) {
+        const qx = rx + 50; drawPrincess(qx);
+      }
+    }
+
+    // Trail.
+    trail.forEach((t, i) => {
+      const k = (i + 1) / trail.length, s = 9 * k;
+      ctx.globalAlpha = k * 0.35; ctx.fillStyle = C.cyan;
+      ctx.fillRect(t.x - scroll - s / 2, t.y - s / 2, s, s);
+    });
+    ctx.globalAlpha = 1;
+
+    // Player: a cute runner with a hump on its back. Legs and arms swing on a run cycle and rise in the air.
+    if (state !== 'dead') {
+      const air = !p.onGround, sw = Math.sin(runT);
+      const limb = (x0, y0, len, a, w, col) => {
+        ctx.strokeStyle = col; ctx.lineWidth = w; ctx.lineCap = 'round';
+        ctx.beginPath(); ctx.moveTo(x0, y0);
+        ctx.lineTo(x0 + Math.sin(a) * len, y0 + Math.cos(a) * len); ctx.stroke();
+      };
+      const far = '#17808a', near = C.cyan;
+      ctx.save(); ctx.translate(PX + S / 2, p.y + S / 2);
+      ctx.shadowColor = C.cyan; ctx.shadowBlur = 10;
+      limb(0, 6, 14, air ? -0.5 : -sw * 0.85, 5, far);
+      limb(0, -4, 11, air ? 2.6 : 0.3 + sw * 1.0, 4.5, far);
+      limb(0, -4, 10, 0, 6, near);
+      ctx.fillStyle = near; ctx.beginPath(); ctx.arc(-4.5, -6, 4.5, 0, Math.PI * 2); ctx.fill();
+      limb(0, 6, 14, air ? 0.7 : sw * 0.85, 5, near);
+      limb(0, -4, 11, air ? 2.2 : 0.3 - sw * 1.0, 4.5, near);
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = '#fff3e0'; ctx.strokeStyle = near; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(0, -12, 7, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = C.gold;
+      ctx.beginPath(); ctx.arc(0, -12, 7.6, Math.PI, Math.PI * 2); ctx.fill();
+      ctx.fillRect(1, -13.4, 8, 2);
+      ctx.fillStyle = C.ink;
+      ctx.beginPath(); ctx.arc(3.4, -9.6, 1.6, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath(); ctx.arc(4, -10.2, 0.5, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = 'rgba(255, 61, 134, .5)';
+      ctx.beginPath(); ctx.arc(1.4, -7.6, 1.5, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = C.ink; ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.arc(3.2, -7.4, 1.6, 0.3, 1.4); ctx.stroke();
+      ctx.restore();
+    }
+
+    // Finale: the hearts and the speech bubble, from the princess.
+    if (state === 'won' && level === NL - 1) {
+      for (const h of hearts) { ctx.globalAlpha = Math.max(0, h.life); drawHeart(h.x, h.y, 9, C.pink); }
+      ctx.globalAlpha = 1;
+      if (finaleT > 1.2) {
+        const qx = LEN - scroll + 50, txt = T[lang].thanks;
+        ctx.font = '800 20px system-ui, -apple-system, Segoe UI, sans-serif';
+        const bw = ctx.measureText(txt).width + 32, bh = 44;
+        const bx = Math.max(8, Math.min(W - bw - 8, qx + 20 - bw / 2)), by = 150;
+        ctx.globalAlpha = Math.min(1, (finaleT - 1.2) * 3);
+        ctx.fillStyle = '#ffffff';
+        bubble(bx, by, bw, bh); ctx.fill();
+        ctx.beginPath(); ctx.moveTo(qx - 7, by + bh - 1); ctx.lineTo(qx + 7, by + bh - 1); ctx.lineTo(qx, GROUND - 88); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = C.ink; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(txt, bx + bw / 2, by + bh / 2 + 1);
+        ctx.textAlign = 'start'; ctx.textBaseline = 'alphabetic';
+        ctx.globalAlpha = 1;
+      }
+    }
+    // Particles and death flash.
+    for (const q of parts) { ctx.globalAlpha = Math.max(0, q.life); ctx.fillStyle = q.color; ctx.fillRect(q.x, q.y, 5, 5); }
+    ctx.globalAlpha = 1;
+    if (flash > 0) { ctx.globalAlpha = flash * 0.6; ctx.fillStyle = '#ffffff'; ctx.fillRect(-20, -20, W + 40, H + 40); ctx.globalAlpha = 1; }
+    ctx.restore();
+  }
+
+  function hud() {
+    const pct = Math.min(1, scroll / TOTAL);
+    $('fill').style.width = (pct * 100).toFixed(1) + '%';
+    $('pct').textContent = Math.floor(pct * 100) + '%';
+    $('att').textContent = attempts;
+    $('best').textContent = bestOf(level) + '%';
+    $('lives').textContent = lives;
+  }
+
+  function frame(now) {
+    const dt = Math.min(0.033, (now - last) / 1000); last = now;
+    if (state === 'play' && !paused) update(dt);
+    else if (state === 'dead') {
+      deadT += dt;
+      if (deadT > 0.8) { if (lives > 0) reset('play'); else gameOver(); }
+    }
+    for (let i = parts.length - 1; i >= 0; i--) {
+      const q = parts[i];
+      q.vy += 900 * dt; q.x += q.vx * dt; q.y += q.vy * dt; q.life -= dt * 1.4;
+      if (q.life <= 0) parts.splice(i, 1);
+    }
+    flash = Math.max(0, flash - dt * 2.5);
+    shake = Math.max(0, shake - dt * 40);
+    if (state === 'won' && level === NL - 1) finale(dt);
+    draw(); hud();
+    requestAnimationFrame(frame);
+  }
+
+  // Input: keyboard, pointer and touch all feed one "held" flag.
+  const isJump = e => e.code === 'Space' || e.code === 'ArrowUp' || e.code === 'KeyW';
+  addEventListener('keydown', e => {
+    if (isJump(e)) { e.preventDefault(); held = true; press(); }
+    else if (e.code === 'KeyR' && state === 'play') die();
+    else if (e.code === 'KeyP' || e.code === 'Escape') togglePause();
+  });
+  addEventListener('keyup', e => { if (isJump(e)) held = false; });
+  addEventListener('pointerup', () => { held = false; });
+  addEventListener('pointercancel', () => { held = false; });
+  addEventListener('blur', () => { held = false; if (state === 'play') setPaused(true); });
+  $('stage').addEventListener('pointerdown', e => {
+    if (e.target.closest('button')) return;
+    e.preventDefault(); held = true; press();
+  });
+  $('go').addEventListener('click', () => press());
+  $('next').addEventListener('click', () => startLevel(level + 1));
+  $('again').addEventListener('click', () => startLevel(level));
+  $('pause').addEventListener('click', togglePause);
+  $('resume').addEventListener('click', () => setPaused(false));
+  $('restart').addEventListener('click', () => freshRun(0));
+  $('lang').addEventListener('click', toggleLang);
+
+  // Every visit starts on level 1.
+  loadLevel(0);
+  applyLang();
+  $('lvl').textContent = 1;
+  setMini(0);
+  reset('ready');
+  hud();
+  requestAnimationFrame(frame);
+})();
+</script>
+<script>
+if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  });
+}
+</script>
+</body>
+</html>
