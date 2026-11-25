@@ -66,12 +66,18 @@ button:focus-visible { outline: 3px solid var(--gold); outline-offset: 3px; }
   .hud { height: 168px; align-content: flex-start; }
   .rotate { display: block; }
 }
-/* Phones held sideways: the game fills the height of the screen and the HUD becomes one slim bar. */
+/* Phones held sideways: the field covers the whole screen and the HUD floats as a slim bar over the top. */
 @media (orientation: landscape) and (max-height: 500px) {
-  body { padding-block: 6px; }
-  .hud { height: 40px; margin-bottom: 6px; flex-wrap: nowrap; gap: 8px; }
+  body { padding: 0; }
+  .hud {
+    position: absolute; top: 0; left: 0; right: 0; z-index: 2; height: auto; margin: 0; max-width: none;
+    padding: 8px 16px; flex-wrap: nowrap; gap: 8px;
+    background: linear-gradient(rgba(13, 5, 36, .55), rgba(13, 5, 36, 0));
+  }
   .hud h1, .hud .stats, .hud .mini, .hint { display: none; }
-  .stage { max-width: min(960px, calc((100vh - 64px) * 16 / 9)); }
+  .hud .lang { background: rgba(13, 5, 36, .8); }
+  .stage { position: fixed; inset: 0; z-index: 1; max-width: none; border: 0; border-radius: 0; box-shadow: none; }
+  .stage canvas { width: 100%; height: 100%; }
 }
 /* The "Help!" bubble beside the castle: it pops in, stays a moment, and pops out. */
 .help { transform-box: fill-box; transform-origin: 100% 50%; animation: help 3.2s ease-in-out infinite; }
@@ -157,11 +163,21 @@ button:focus-visible { outline: 3px solid var(--gold); outline-offset: 3px; }
 <p class="hint" id="tHint">Spazio, freccia su o tocco per saltare · R per ricominciare · Tocca la corda della campana in fondo al livello</p>
 <script>
 (() => {
-  const W = 960, H = 540, GROUND = 430, S = 40, PX = 170, GRAV = 2600, JUMP = 900;
+  let W = 960; // logical width of the field; it grows on phones held sideways
+  const H = 540, GROUND = 430, S = 40, PX = 170, GRAV = 2600, JUMP = 900;
   const C = { cyan: '#3ff2ff', gold: '#ffd23f', pink: '#ff3d86', top: '#ffffff', low: '#d9d3ea', ink: '#0d0524', block: '#2b1670', floor: '#12063a' };
   let SPEED = 330, LEN = 6000, TOTAL = LEN - PX, level = 0;
   const KEY = 'gobbo-livelli';
   const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+  // On phones held sideways the field stretches to the full screen: its logical width follows the screen's proportions.
+  const sideways = matchMedia('(orientation: landscape) and (max-height: 500px)');
+  function fitField() {
+    W = sideways.matches ? Math.round(H * innerWidth / innerHeight) : 960;
+    if (cv.width !== W) { cv.width = W; cv.height = H; }
+  }
+  sideways.addEventListener('change', fitField);
+  addEventListener('resize', fitField);
+  fitField();
   const $ = id => document.getElementById(id);
 
   // Twenty levels, from easy to brutal, each with its own colour: white first, black last.
